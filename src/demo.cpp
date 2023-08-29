@@ -2,16 +2,43 @@
 // For disable PCL complile lib, to use PointXYZIR
 #define PCL_NO_PRECOMPILE
 
+
+#ifdef TARGET_ROS1
 #include <ros/ros.h>
-#include <signal.h>
 #include <sensor_msgs/PointCloud2.h>
+#include "patchworkpp/patchworkpp.hpp"
+#else
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include "patchworkpp/patchworkpp_ros2.hpp"
+#endif
+#include <signal.h>
 #include <pcl_conversions/pcl_conversions.h>
 
-#include "patchworkpp/patchworkpp.hpp"
 
 using PointType = pcl::PointXYZI;
 using namespace std;
 
+
+#ifdef TARGET_ROS2
+
+std::shared_ptr<PatchWorkpp<PointType>> PatchworkppGroundSeg;
+
+int main(int argc, char**argv) {
+    rclcpp::init(argc, argv);
+    // ros::NodeHandle nh;
+    // ros::NodeHandle pnh("~");
+
+
+    cout << "Operating patchwork++..." << endl;
+    PatchworkppGroundSeg.reset(new PatchWorkpp<PointType>());
+    rclcpp::spin(PatchworkppGroundSeg);
+    rclcpp::shutdown();
+
+    return 0;
+}
+
+#else
 boost::shared_ptr<PatchWorkpp<PointType>> PatchworkppGroundSeg;
 
 ros::Publisher pub_cloud;
@@ -69,3 +96,4 @@ int main(int argc, char**argv) {
 
     return 0;
 }
+#endif

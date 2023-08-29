@@ -1,0 +1,15 @@
+<launch>
+  <arg name="cloud_topic" default="/wamv/sensors/lidars/os0_sensor/points"/>
+
+  <node name="ground_segmentation" pkg="patchworkpp" exec="demo" output="screen">
+    <param from="$(find-pkg-share patchworkpp)/config/params_ros2.yaml"/>
+    <param name="cloud_topic" value="$(var cloud_topic)"/>
+  </node>
+</launch>
+
+
+<!-- <launch>
+
+  <node name="$(anon rviz)" pkg="rviz" type="rviz" args="-d $(find patchworkpp)/rviz/demo.rviz"/>
+
+</launch> -->
