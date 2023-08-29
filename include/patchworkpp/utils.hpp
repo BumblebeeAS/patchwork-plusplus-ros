@@ -12,7 +12,7 @@
 #include <pcl/common/transforms.h>
 #ifdef TARGET_ROS1
 #include <tf/tf.h>
-#include <pcl_ros/point_cloud.hpp>
+#include <pcl_ros/point_cloud.h>
 #endif
 #include <pcl/filters/filter.h>
 #include <pcl/point_types.h>

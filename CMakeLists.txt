@@ -100,6 +100,13 @@ if (OPENMP_FOUND)
 endif()
 
 if($ENV{ROS_VERSION} STREQUAL "1")
+  generate_messages(
+          DEPENDENCIES
+          std_msgs
+          geometry_msgs
+          sensor_msgs
+  )
+
   catkin_package(
           INCLUDE_DIRS
           LIBRARIES

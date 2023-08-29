@@ -17,8 +17,8 @@
 
   <depend condition="$ROS_VERSION == 1">message_generation</depend>
   <depend>libpcl-all</depend>
-  <depend condition="$ROS_VERSION == 1">rclcpp</depend>
-  <depend condition="$ROS_VERSION == 1">rclpy</depend>
+  <depend condition="$ROS_VERSION == 1">roscpp</depend>
+  <depend condition="$ROS_VERSION == 1">rospy</depend>
   <depend>std_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>  
