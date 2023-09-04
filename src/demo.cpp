@@ -26,12 +26,13 @@ std::shared_ptr<PatchWorkpp<PointType>> PatchworkppGroundSeg;
 
 int main(int argc, char**argv) {
     rclcpp::init(argc, argv);
+    rclcpp::NodeOptions options;
     // ros::NodeHandle nh;
     // ros::NodeHandle pnh("~");
 
 
     cout << "Operating patchwork++..." << endl;
-    PatchworkppGroundSeg.reset(new PatchWorkpp<PointType>());
+    PatchworkppGroundSeg.reset(new PatchWorkpp<PointType>(options));
     rclcpp::spin(PatchworkppGroundSeg);
     rclcpp::shutdown();
 

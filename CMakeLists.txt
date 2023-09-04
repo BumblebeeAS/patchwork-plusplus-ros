@@ -51,6 +51,7 @@ else()
   # find_package(jsk_recognition_msgs REQUIRED)
   find_package(laser_geometry REQUIRED)
   find_package(cv_bridge REQUIRED)
+  find_package(rclcpp_components REQUIRED)
 
   set(INCLUDE_DIRS include ${ament_cmake_INCLUDE_DIRS} ${rclcpp_INCLUDE_DIRS}
     ${rclpy_INCLUDE_DIRS} ${pcl_ros_INCLUDE_DIRS} ${pcl_conversions_INCLUDE_DIRS}
@@ -59,7 +60,8 @@ else()
     # ${roslaunch_INCLUDE_DIRS}
     ${sensor_msgs_INCLUDE_DIRS}
     #  ${jsk_recognition_msgs_INCLUDE_DIRS}
-    ${laser_geometry_INCLUDE_DIRS} ${cv_bridge_INCLUDE_DIRS})
+    ${laser_geometry_INCLUDE_DIRS} ${cv_bridge_INCLUDE_DIRS}
+    ${rclcpp_components_INCLUDE_DIRS})
   include_directories(${INCLUDE_DIRS})
 
   set(LIBRARY_DIRS ${ament_cmake_LIBRARY_DIRS} ${rclcpp_LIBRARY_DIRS}
@@ -69,7 +71,8 @@ else()
     # ${roslaunch_LIBRARY_DIRS}
     ${sensor_msgs_LIBRARY_DIRS}
     #  ${jsk_recognition_msgs_LIBRARY_DIRS}
-    ${laser_geometry_LIBRARY_DIRS} ${cv_bridge_LIBRARY_DIRS})
+    ${laser_geometry_LIBRARY_DIRS} ${cv_bridge_LIBRARY_DIRS}
+    ${rclcpp_components_LIBRARY_DIRS})
 
   link_directories(${LIBRARY_DIRS})
 
@@ -79,7 +82,8 @@ else()
     # ${roslaunch_LIBRARIES} 
     ${sensor_msgs_LIBRARIES}
     ${jsk_recognition_msgs_LIBRARIES} ${laser_geometry_LIBRARIES}
-    ${cv_bridge_LIBRARIES})
+    ${cv_bridge_LIBRARIES}
+    ${rclcpp_components_LIBRARIES})
 endif()
 add_compile_options(-std=c++17)
 set(CMAKE_BUILD_TYPE "Release")
@@ -146,6 +150,24 @@ if($ENV{ROS_VERSION} STREQUAL "1")
 else()
   add_executable(demo src/demo.cpp)
   target_link_libraries(demo ${LIBS} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+
+  set(node_plugins "")
+
+
+  message("adding PatchworkppPointXYZI")
+  add_library(patchworkpp SHARED src/patchworkpp_ros2.cpp)
+  target_compile_definitions(patchworkpp PRIVATE "PATCHWORKPP_COMPOSITION_BUILDING_DLL")
+  target_link_libraries(patchworkpp ${LIBS})
+  rclcpp_components_register_nodes(patchworkpp "patchworkpp::PatchworkppPointXYZI")
+  set(node_plugins "${node_plugins}patchworkpp::PatchworkppPointXYZI;$<TARGET_FILE:patchworkpp_ros2>\n")
+
+  install(TARGETS
+    patchworkpp
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+  )
+
   # ==== Install ====
   install(TARGETS demo
     ARCHIVE
