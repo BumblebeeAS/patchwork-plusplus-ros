@@ -13,6 +13,7 @@
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/parameter_value.hpp>
 #include <eigen3/Eigen/Dense>
 
 #include <boost/format.hpp>
@@ -91,10 +92,14 @@ public:
         declare_parameter("enable_TGR", rclcpp::PARAMETER_BOOL);
 
         declare_parameter("czm.num_zones", rclcpp::PARAMETER_INTEGER);
-        declare_parameter("czm.num_sectors_each_zone", std::vector<long>{8, 8, 8, 8});
-        declare_parameter("czm.num_rings_each_zone", std::vector<long>{8, 8, 8, 8});
-        declare_parameter("czm.elevation_thresholds", std::vector<double>{0.0, 0.0, 0.0, 0.0});
-        declare_parameter("czm.flatness_thresholds", std::vector<double>{0.0, 0.0, 0.0, 0.0});
+
+        
+        this->get_node_parameters_interface()->declare_parameter(
+            "czm.num_sectors_each_zone", rclcpp::ParameterValue(std::vector<int64_t>{}));
+        this->get_node_parameters_interface()->declare_parameter(
+            "czm.num_rings_each_zone", rclcpp::ParameterValue(std::vector<int64_t>{}));
+        declare_parameter<std::vector<double>>("czm.elevation_thresholds");
+        declare_parameter<std::vector<double>>("czm.flatness_thresholds");
         declare_parameter("visualize", rclcpp::PARAMETER_BOOL);
 
         verbose_ = get_parameter("verbose").as_bool();
@@ -149,28 +154,16 @@ public:
         flatness_thr_ = get_parameter("czm.flatness_thresholds").as_double_array();
 
         RCLCPP_INFO(
-            rclcpp::get_logger("patchworkpp"), "Num. zones: %d", num_zones_);
+            rclcpp::get_logger("patchworkpp"), "Num. zones: %d %ld %ld", num_zones_,
+                num_sectors_each_zone_.size(), num_rings_each_zone_.size());
 
-        if (num_zones_ != 4 || num_sectors_each_zone_.size() != num_rings_each_zone_.size()) {
+        if (num_zones_ != num_sectors_each_zone_.size() || num_sectors_each_zone_.size() != num_rings_each_zone_.size()) {
             throw invalid_argument("Some parameters are wrong! Check the num_zones and num_rings/sectors_each_zone");
         }
         if (elevation_thr_.size() != flatness_thr_.size()) {
             throw invalid_argument("Some parameters are wrong! Check the elevation/flatness_thresholds");
         }
 
-        cout << (boost::format("Num. sectors: %d, %d, %d, %d") % num_sectors_each_zone_[0] % num_sectors_each_zone_[1] %
-                 num_sectors_each_zone_[2] %
-                 num_sectors_each_zone_[3]).str() << endl;
-        cout << (boost::format("Num. rings: %01d, %01d, %01d, %01d") % num_rings_each_zone_[0] %
-                 num_rings_each_zone_[1] %
-                 num_rings_each_zone_[2] %
-                 num_rings_each_zone_[3]).str() << endl;
-        cout << (boost::format("elevation_thr_: %0.4f, %0.4f, %0.4f, %0.4f ") % elevation_thr_[0] % elevation_thr_[1] %
-                 elevation_thr_[2] %
-                 elevation_thr_[3]).str() << endl;
-        cout << (boost::format("flatness_thr_: %0.4f, %0.4f, %0.4f, %0.4f ") % flatness_thr_[0] % flatness_thr_[1] %
-                 flatness_thr_[2] %
-                 flatness_thr_[3]).str() << endl;
         num_rings_of_interest_ = elevation_thr_.size();
 
         visualize_ = get_parameter("visualize").as_bool();
@@ -185,40 +178,59 @@ public:
         regionwise_nonground_.reserve(NUM_HEURISTIC_MAX_PTS_IN_PATCH);
 
         // PlaneViz        = node_handle_.advertise<jsk_recognition_msgs::PolygonArray>("plane", 100, true);
-        pub_revert_pc = Node::create_publisher<sensor_msgs::msg::PointCloud2>("plane", 100);
-        pub_reject_pc = Node::create_publisher<sensor_msgs::msg::PointCloud2>("plane", 100);
-        pub_normal = Node::create_publisher<sensor_msgs::msg::PointCloud2>("plane", 100);
-        pub_noise = Node::create_publisher<sensor_msgs::msg::PointCloud2>("plane", 100);
-        pub_vertical = Node::create_publisher<sensor_msgs::msg::PointCloud2>("plane", 100);
+        pub_revert_pc = this->create_publisher<sensor_msgs::msg::PointCloud2>("plane", 100);
+        pub_reject_pc = this->create_publisher<sensor_msgs::msg::PointCloud2>("plane", 100);
+        pub_normal = this->create_publisher<sensor_msgs::msg::PointCloud2>("plane", 100);
+        pub_noise = this->create_publisher<sensor_msgs::msg::PointCloud2>("plane", 100);
+        pub_vertical = this->create_publisher<sensor_msgs::msg::PointCloud2>("plane", 100);
 
-        min_range_z2_ = (7 * min_range_ + max_range_) / 8.0;
-        min_range_z3_ = (3 * min_range_ + max_range_) / 4.0;
-        min_range_z4_ = (min_range_ + max_range_) / 2.0;
+        min_ranges_.resize(num_zones_);
+        sector_sizes_.resize(num_zones_);
+        ring_sizes_.resize(num_zones_);
+        min_ranges_.push_back(min_range_);
+        sector_sizes_.push_back(2 * M_PI / num_sectors_each_zone_.at(0));
+        for (int i = 1; i < num_zones_; i++) {
+            float scale = std::pow(2.0, num_zones_ - i);
+            min_ranges_.push_back(((scale - 1.0) * min_range_ + max_range_) / scale);
+            // RCLCPP_INFO(
+            //     rclcpp::get_logger("patchworkpp"), "min_range %d %d %d", scale, i, min_ranges_.at(i));
+            sector_sizes_.push_back(2 * M_PI / num_sectors_each_zone_.at(i));
+            ring_sizes_.push_back((min_ranges_.at(i) - min_ranges_.at(i-1)) / num_rings_each_zone_.at(i-1));
+        }
+        ring_sizes_.push_back((max_range_ - min_ranges_.at(num_zones_ - 1)) / num_rings_each_zone_.at(num_zones_-1));
+        // min_range_z2_ = (15 * min_range_ + max_range_) / 16.0;
+        // min_range_z3_ = (7 * min_range_ + max_range_) / 8.0;
+        // min_range_z4_ = (3 * min_range_ + max_range_) / 4.0;
+        // min_range_z5_ = (min_range_ + max_range_) / 2.0;
 
-        min_ranges_ = {min_range_, min_range_z2_, min_range_z3_, min_range_z4_};
-        ring_sizes_ = {(min_range_z2_ - min_range_) / num_rings_each_zone_.at(0),
-                      (min_range_z3_ - min_range_z2_) / num_rings_each_zone_.at(1),
-                      (min_range_z4_ - min_range_z3_) / num_rings_each_zone_.at(2),
-                      (max_range_ - min_range_z4_) / num_rings_each_zone_.at(3)};
-        sector_sizes_ = {2 * M_PI / num_sectors_each_zone_.at(0), 2 * M_PI / num_sectors_each_zone_.at(1),
-                        2 * M_PI / num_sectors_each_zone_.at(2),
-                        2 * M_PI / num_sectors_each_zone_.at(3)};
 
-        cout << "INITIALIZATION COMPLETE" << endl;
+        // min_ranges_ = {min_range_, min_range_z2_, min_range_z3_, min_range_z4_, min_range_z5_};
+        // ring_sizes_ = {(min_range_z2_ - min_range_) / num_rings_each_zone_.at(0),
+        //               (min_range_z3_ - min_range_z2_) / num_rings_each_zone_.at(1),
+        //               (min_range_z4_ - min_range_z3_) / num_rings_each_zone_.at(2),
+        //               (min_range_z5_ - min_range_z4_) / num_rings_each_zone_.at(3),
+        //               (max_range_ - min_range_z5_) / num_rings_each_zone_.at(4)};
+        // sector_sizes_ = {2 * M_PI / num_sectors_each_zone_.at(0),
+        //                 2 * M_PI / num_sectors_each_zone_.at(1),
+        //                 2 * M_PI / num_sectors_each_zone_.at(2),
+        //                 2 * M_PI / num_sectors_each_zone_.at(3),
+        //                 2 * M_PI / num_sectors_each_zone_.at(4)};
+
+        RCLCPP_INFO(rclcpp::get_logger("patchworkpp"),"INITIALIZATION COMPLETE");
 
         for (int i = 0; i < num_zones_; i++) {
             Zone z;
-            initialize_zone(z, num_sectors_each_zone_[i], num_rings_each_zone_[i]);
+            initialize_zone(z, num_sectors_each_zone_.at(i), num_rings_each_zone_.at(i));
             ConcentricZoneModel_.push_back(z);
         }
 
 
         declare_parameter("cloud_topic", "/pointcloud");
         cloud_topic = get_parameter("cloud_topic").as_string();
-        pub_cloud = Node::create_publisher<sensor_msgs::msg::PointCloud2>("cloud", 100);
-        pub_ground = Node::create_publisher<sensor_msgs::msg::PointCloud2>("ground", 100);
-        pub_non_ground = Node::create_publisher<sensor_msgs::msg::PointCloud2>("nonground", 100);
-        sub_cloud = Node::create_subscription<sensor_msgs::msg::PointCloud2>(cloud_topic, 100, std::bind(&PatchWorkpp<PointT>::callbackCloud, this, std::placeholders::_1));    
+        pub_cloud = this->create_publisher<sensor_msgs::msg::PointCloud2>("cloud", 100);
+        pub_ground = this->create_publisher<sensor_msgs::msg::PointCloud2>("ground", 100);
+        pub_non_ground = this->create_publisher<sensor_msgs::msg::PointCloud2>("nonground", 100);
+        sub_cloud = this->create_subscription<sensor_msgs::msg::PointCloud2>(cloud_topic, 1, std::bind(&PatchWorkpp<PointT>::callbackCloud, this, std::placeholders::_1));    
         callback_handle_ = this->add_on_set_parameters_callback(std::bind(&PatchWorkpp<PointT>::parametersCallback, this, std::placeholders::_1));
 
     };
@@ -251,9 +263,11 @@ private:
     double min_range_;
     double uprightness_thr_;
     double adaptive_seed_selection_margin_;
+    std::vector<double> min_ranges_;
     double min_range_z2_; // 12.3625
     double min_range_z3_; // 22.025
     double min_range_z4_; // 41.35
+    double min_range_z5_; // 41.35
     double RNR_ver_angle_thr_;
     double RNR_intensity_thr_;
 
@@ -263,8 +277,8 @@ private:
     bool enable_TGR_;
 
     int max_flatness_storage_, max_elevation_storage_;
-    std::vector<double> update_flatness_[4];
-    std::vector<double> update_elevation_[4];
+    std::vector<double> update_flatness_[5];
+    std::vector<double> update_elevation_[5];
 
     float d_;
 
@@ -282,7 +296,6 @@ private:
 
     vector<double> sector_sizes_;
     vector<double> ring_sizes_;
-    vector<double> min_ranges_;
     vector<double> elevation_thr_;
     vector<double> flatness_thr_;
 
@@ -548,8 +561,9 @@ rcl_interfaces::msg::SetParametersResult PatchWorkpp<PointT>::parametersCallback
         sub_cloud = Node::create_subscription<sensor_msgs::msg::PointCloud2>(cloud_topic, 100, std::bind(&PatchWorkpp<PointT>::callbackCloud, this, std::placeholders::_1));    
     }
 
-    if (new_num_zones_ != 4 || new_num_sectors_each_zone_.size() != new_num_rings_each_zone_.size()) {
+    if (new_num_zones_ != new_num_sectors_each_zone_.size() || new_num_sectors_each_zone_.size() != new_num_rings_each_zone_.size()) {
         result.successful = false;
+        std::cout << new_num_sectors_each_zone_.size() << new_num_rings_each_zone_.size() << std::endl;
         result.reason = "Some parameters are wrong! Check the num_zones and num_rings/sectors_each_zone";
     } else {
         num_zones_ = new_num_zones_;
@@ -1164,8 +1178,7 @@ template<typename PointT>
 sensor_msgs::msg::PointCloud2 PatchWorkpp<PointT>::cloud2msg(pcl::PointCloud<PointT> cloud, const rclcpp::Time& stamp, std::string frame_id) {
     sensor_msgs::msg::PointCloud2 cloud_ROS;
     pcl::toROSMsg(cloud, cloud_ROS);
-    cloud_ROS.header.stamp.sec = stamp.seconds();
-    cloud_ROS.header.stamp.nanosec = stamp.nanoseconds() - stamp.seconds()*1e9;
+    cloud_ROS.header.stamp = stamp;
     cloud_ROS.header.frame_id = frame_id;
     return cloud_ROS;
 }
@@ -1185,14 +1198,14 @@ void PatchWorkpp<PointT>::pc2czm(const pcl::PointCloud<PointT> &src, std::vector
         if ((r <= max_range_) && (r > min_range_)) {
             double theta = xy2theta(pt.x, pt.y);
 
-            int zone_idx = 0;
-            if ( r < min_ranges_[1] ) zone_idx = 0;
-            else if ( r < min_ranges_[2] ) zone_idx = 1;
-            else if ( r < min_ranges_[3] ) zone_idx = 2;
-            else zone_idx = 3;
+            int zone_idx = num_zones_ - 1;
+            for (int i = 1; i < num_zones_ - 1; i++) {
+                if (r < min_ranges_.at(i)) zone_idx = i - 1;
+            }
 
-            int ring_idx = min(static_cast<long>(((r - min_ranges_[zone_idx]) / ring_sizes_[zone_idx])), num_rings_each_zone_[zone_idx] - 1);
-            int sector_idx = min(static_cast<long>((theta / sector_sizes_[zone_idx])), num_sectors_each_zone_[zone_idx] - 1);
+            int ring_idx = min(static_cast<long>(((r - min_ranges_.at(zone_idx)) / ring_sizes_.at(zone_idx))), num_rings_each_zone_.at(zone_idx) - 1);
+            int sector_idx = min(static_cast<long>((theta / sector_sizes_.at(zone_idx))),
+                num_sectors_each_zone_.at(zone_idx) - 1);
 
             czm[zone_idx][ring_idx][sector_idx].points.emplace_back(pt);
         }
