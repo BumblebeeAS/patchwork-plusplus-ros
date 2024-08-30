@@ -158,8 +158,12 @@ else()
   add_library(patchworkpp SHARED src/patchworkpp_ros2.cpp)
   target_compile_definitions(patchworkpp PRIVATE "PATCHWORKPP_COMPOSITION_BUILDING_DLL")
   target_link_libraries(patchworkpp ${LIBS})
-  rclcpp_components_register_nodes(patchworkpp "patchworkpp::PatchworkppPointXYZI")
+  rclcpp_components_register_node(
+    patchworkpp PLUGIN "patchworkpp::PatchworkppPointXYZI" EXECUTABLE patchworkpp_xyzi)
   set(node_plugins "${node_plugins}patchworkpp::PatchworkppPointXYZI;$<TARGET_FILE:patchworkpp_ros2>\n")
+  rclcpp_components_register_node(
+    patchworkpp PLUGIN "patchworkpp::PatchworkppPointXYZ" EXECUTABLE patchworkpp_xyz)
+  set(node_plugins "${node_plugins}patchworkpp::PatchworkppPointXYZ;$<TARGET_FILE:patchworkpp_ros2>\n")
 
   install(TARGETS
     patchworkpp
